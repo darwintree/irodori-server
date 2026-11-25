@@ -12,6 +12,7 @@
   - 若 `reference_audio_id` 为空，或下载/推理失败（`FALLBACK_TO_EMBED_ON_REF_ERROR=true`），自动回退到该角色的 49 KB `*.speaker.safetensors`；
   - `character_name` 自动兼容英文 ID（`hazuki`）、日文短名（`はづき`）、日文全名（`七草はづき`）及中文名（`七草叶月`）。
 - **推理默认配置**：
+  - 默认启动即加载单份模型权重与 DACVAE 编解码器并执行一次 1 步预热推理（`PRELOAD_ON_STARTUP=true`），就绪后立即以稳定延迟响应首请求；
   - 默认 `6` 步（`DEFAULT_NUM_STEPS=6`），不做长文本自动切割；
   - 默认关闭 SilentCipher 水印（`ENABLE_WATERMARK=false`），保留原生 48 kHz 波形并省去 CPU 水印耗时；
   - `MODEL_PRECISION=auto`：在支持 `amx_bf16` / `avx512_bf16` 的 Xeon/EPYC CPU 上自动启用安全 BF16 推理（保留 RoPE 复数缓存），无硬件 BF16 时自动使用 FP32。

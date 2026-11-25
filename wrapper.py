@@ -163,9 +163,18 @@ class IrodoriWrapper:
         )
         self._cleanup_worker.start()
 
+    def _find_warmup_speaker_embed(self) -> str | None:
+        if not self.speakers_dir.is_dir():
+            return None
+        for candidate in sorted(self.speakers_dir.glob("*.speaker.safetensors")):
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
     def preload(self) -> None:
-        """Eagerly load Irodori weights and codec during server startup."""
+        """Eagerly load Irodori weights, codec, and run a warmup pass during server startup."""
         self._engine.load()
+        self._engine.warmup(ref_embed=self._find_warmup_speaker_embed())
 
     def _get_resource_url(self, resource_audio_id: str) -> str:
         if not self.reference_resource_server:

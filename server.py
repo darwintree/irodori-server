@@ -81,7 +81,7 @@ limiter = Limiter(key_func=_client_ip, headers_enabled=True)
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if PRELOAD_ON_STARTUP:
-        logger.info("Preloading Irodori-TTS model on startup...")
+        logger.info("Loading and warming up Irodori-TTS model on startup...")
         wrapper.preload()
     yield
 

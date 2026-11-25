@@ -19,7 +19,7 @@ class ServerCompatibilityTest(unittest.TestCase):
                 os.environ,
                 {
                     "BASE_STATIC_URL": "https://example.test/audio",
-                    "PRELOAD_ON_STARTUP": "false",
+                    "PRELOAD_ON_STARTUP": "",
                     "TASK_RATE_LIMIT": "100/day",
                 },
             ),
@@ -27,11 +27,44 @@ class ServerCompatibilityTest(unittest.TestCase):
         ):
             cls.server = importlib.import_module("server")
         cls.client = TestClient(cls.server.app)
+        cls.client.__enter__()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.__exit__(None, None, None)
 
     def setUp(self) -> None:
         self.backend.create_tts_task.reset_mock(return_value=True, side_effect=True)
         self.backend.create_tts_task.return_value = "hazuki_1700000000_deadbeef"
         self.backend.get_task_status.reset_mock(return_value=True, side_effect=True)
+
+    def test_preloads_model_on_startup_by_default(self) -> None:
+        self.assertTrue(self.server.PRELOAD_ON_STARTUP)
+        self.backend.preload.assert_called_once_with()
+
+    def test_skips_preload_when_env_disabled(self) -> None:
+        disabled_backend = Mock()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "BASE_STATIC_URL": "https://example.test/audio",
+                    "PRELOAD_ON_STARTUP": "false",
+                    "TASK_RATE_LIMIT": "100/day",
+                },
+            ),
+            patch("wrapper.IrodoriWrapper", return_value=disabled_backend),
+        ):
+            sys.modules.pop("server", None)
+            try:
+                disabled_server = importlib.import_module("server")
+                with TestClient(disabled_server.app):
+                    pass
+            finally:
+                sys.modules["server"] = self.server
+
+        self.assertFalse(disabled_server.PRELOAD_ON_STARTUP)
+        disabled_backend.preload.assert_not_called()
 
     @staticmethod
     def _genie_payload() -> dict[str, str]:

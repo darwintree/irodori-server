@@ -6,7 +6,7 @@ import threading
 import unittest
 from unittest.mock import Mock, call, patch
 
-from engine import resolve_effective_precision
+from engine import EngineConfig, IrodoriEngine, resolve_effective_precision
 from r2_storage import R2Storage
 from wrapper import IrodoriWrapper, TaskRecord
 
@@ -222,6 +222,81 @@ class EnginePrecisionTest(unittest.TestCase):
     def test_explicit_precision_is_respected(self) -> None:
         self.assertEqual(resolve_effective_precision("bf16", "cpu"), "bf16")
         self.assertEqual(resolve_effective_precision("fp32", "cpu"), "fp32")
+
+
+class StartupPreloadAndWarmupTest(unittest.TestCase):
+    @staticmethod
+    def _make_loaded_engine() -> tuple[IrodoriEngine, Mock]:
+        engine = IrodoriEngine(EngineConfig(checkpoint=Path("dummy.safetensors")))
+        fake_runtime = Mock()
+        engine._runtime = fake_runtime
+        return engine, fake_runtime
+
+    def test_wrapper_preload_loads_and_warms_up_with_speaker_embed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper = _make_bare_wrapper(directory)
+            embed = wrapper.speakers_dir / "hazuki.speaker.safetensors"
+            embed.write_bytes(b"embed")
+
+            wrapper.preload()
+
+            wrapper._engine.load.assert_called_once_with()
+            wrapper._engine.warmup.assert_called_once_with(ref_embed=str(embed))
+
+    def test_wrapper_preload_warms_up_without_embed_when_speakers_dir_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper = _make_bare_wrapper(directory)
+
+            wrapper.preload()
+
+            wrapper._engine.load.assert_called_once_with()
+            wrapper._engine.warmup.assert_called_once_with(ref_embed=None)
+
+    def test_engine_warmup_runs_once_with_minimal_request(self) -> None:
+        engine, fake_runtime = self._make_loaded_engine()
+        fake_req_cls = Mock(side_effect=lambda **kw: kw)
+        fake_module = Mock(SamplingRequest=fake_req_cls)
+
+        with patch.dict(
+            "sys.modules",
+            {"irodori_tts": Mock(), "irodori_tts.inference_runtime": fake_module},
+        ):
+            elapsed_first = engine.warmup(ref_embed="/tmp/hazuki.speaker.safetensors")
+            elapsed_second = engine.warmup(ref_embed="/tmp/hazuki.speaker.safetensors")
+
+        expected_req = {
+            "text": "テスト。",
+            "caption": "自然な声で話している。",
+            "ref_embed": "/tmp/hazuki.speaker.safetensors",
+            "no_ref": False,
+            "num_steps": 1,
+            "seed": 0,
+        }
+        self.assertGreaterEqual(elapsed_first, 0.0)
+        self.assertEqual(elapsed_second, 0.0)
+        self.assertTrue(engine.is_warmed_up)
+        fake_req_cls.assert_called_once_with(**expected_req)
+        fake_runtime.synthesize.assert_called_once_with(expected_req, log_fn=None)
+
+    def test_engine_warmup_uses_no_ref_when_embed_absent(self) -> None:
+        engine, _fake_runtime = self._make_loaded_engine()
+        fake_req_cls = Mock(side_effect=lambda **kw: kw)
+        fake_module = Mock(SamplingRequest=fake_req_cls)
+
+        with patch.dict(
+            "sys.modules",
+            {"irodori_tts": Mock(), "irodori_tts.inference_runtime": fake_module},
+        ):
+            engine.warmup()
+
+        fake_req_cls.assert_called_once_with(
+            text="テスト。",
+            caption="自然な声で話している。",
+            ref_embed=None,
+            no_ref=True,
+            num_steps=1,
+            seed=0,
+        )
 
 
 class R2StorageTest(unittest.TestCase):

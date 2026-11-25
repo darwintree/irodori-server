@@ -91,6 +91,7 @@ class IrodoriEngine:
         self._lock = threading.Lock()
         self._runtime: Any = None
         self._effective_precision: str | None = None
+        self._warmed_up: bool = False
         self._ensure_irodori_importable()
 
     def _ensure_irodori_importable(self) -> None:
@@ -105,6 +106,10 @@ class IrodoriEngine:
         return self._runtime is not None
 
     @property
+    def is_warmed_up(self) -> bool:
+        return self._warmed_up
+
+    @property
     def effective_precision(self) -> str:
         if self._effective_precision is not None:
             return self._effective_precision
@@ -114,6 +119,36 @@ class IrodoriEngine:
         """Load model weights and DACVAE codec into memory (idempotent)."""
         with self._lock:
             self._load_locked()
+
+    def warmup(self, *, ref_embed: str | None = None) -> float:
+        """Run a minimal 1-step inference pass to warm up runtime kernels (idempotent)."""
+        with self._lock:
+            rt = self._load_locked()
+            if self._warmed_up:
+                return 0.0
+
+            from irodori_tts.inference_runtime import SamplingRequest
+
+            embed = ref_embed or None
+            req = SamplingRequest(
+                text="テスト。",
+                caption="自然な声で話している。",
+                ref_embed=embed,
+                no_ref=embed is None,
+                num_steps=1,
+                seed=0,
+            )
+
+            t0 = time.perf_counter()
+            rt.synthesize(req, log_fn=None)
+            elapsed = time.perf_counter() - t0
+            self._warmed_up = True
+            logger.info(
+                "Warmed up Irodori runtime in %.2fs (mode=%s)",
+                elapsed,
+                "ref_embed" if embed else "no_ref",
+            )
+            return elapsed
 
     def _load_locked(self) -> Any:
         if self._runtime is not None:
